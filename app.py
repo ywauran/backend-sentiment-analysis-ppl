@@ -13,13 +13,9 @@ nltk.download('stopwords')
 nltk.download('punkt')
 
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
 from sklearn.naive_bayes import MultinomialNB
-from sklearn.ensemble import AdaBoostClassifier
-from sklearn.metrics import f1_score
-from sklearn.metrics import confusion_matrix
-from sklearn.model_selection import cross_val_score
 from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.metrics import confusion_matrix, precision_score, recall_score, accuracy_score
 import seaborn as sns
 
 from Sastrawi.Stemmer.StemmerFactory import StemmerFactory
@@ -90,7 +86,48 @@ def remove_stopwords(text):
         return ' '.join(filtered_tokens)
     else:
         return text
-    
+
+def preprocess_and_split_data(texts, data):
+    # Tokenize the text using a regular expression tokenizer
+    token = RegexpTokenizer(r'[a-zA-Z0-9]+')
+    cv = CountVectorizer(stop_words='english', ngram_range=(1, 1), tokenizer=token.tokenize)
+    text_counts = cv.fit_transform(texts)
+
+    # Split the data into training and testing sets
+    X_train, X_test, y_train, y_test = train_test_split(text_counts, [tweet['label'] for tweet in data], test_size=0.2, random_state=19)
+
+    return X_train, X_test, y_train, y_test
+
+def train_classifier(X_train, y_train):
+    # Train a Multinomial Naive Bayes classifier
+    clf = MultinomialNB()
+    clf.fit(X_train, y_train)
+
+    return clf
+
+def predict_labels(clf, X_test):
+    # Make predictions on the testing data
+    y_pred = clf.predict(X_test)
+
+    return y_pred
+
+def compute_precision(y_true, y_pred):
+    # Compute precision
+    precision = precision_score(y_true, y_pred, average='weighted')
+
+    return precision
+
+def compute_recall(y_true, y_pred):
+    # Compute recall
+    recall = recall_score(y_true, y_pred, average='weighted')
+
+    return recall
+
+def compute_accuracy(y_true, y_pred):
+    # Compute accuracy
+    accuracy = accuracy_score(y_true, y_pred)
+
+    return accuracy
 @app.route('/api/pre-processing', methods=['POST'])
 def pre_processing():
     json_data = request.get_json()
@@ -149,11 +186,36 @@ def pre_processing():
     })
 
 @app.route('/api/processing', methods=['POST'])
-def processing():
-    new_data = request.get_json()
-    
-    return jsonify(new_data)
+def process_data():
+    json_data = request.get_json()
+    data = json_data.get('data')
 
+    # Extract tweet texts from data
+    tweets = [tweet['Tweet Text'] for tweet in data]
+
+    # Perform text preprocessing and split into training and testing sets
+    X_train, X_test, y_train, y_test = preprocess_and_split_data(tweets, data)
+
+    # Train a classifier and make predictions
+    clf = train_classifier(X_train, y_train)
+    y_pred = predict_labels(clf, X_test)
+
+    # Compute precision, recall, and accuracy
+    precision = compute_precision(y_test, y_pred)
+    recall = compute_recall(y_test, y_pred)
+    accuracy = compute_accuracy(y_test, y_pred)
+
+    # Compute and return the confusion matrix, precision, recall, and accuracy as a JSON response
+    cm = confusion_matrix(y_test, y_pred)
+    response = {
+        'confusion_matrix': cm.tolist(),
+        'precision': precision,
+        'recall': recall,
+        'accuracy': accuracy,
+        'processed_data': data
+    }
+    
+    return jsonify(response)
 
 @app.route('/', methods=['GET'])
 def hello_world():
