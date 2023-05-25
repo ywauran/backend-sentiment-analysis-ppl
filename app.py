@@ -177,88 +177,36 @@ def compute_accuracy(y_true, y_pred):
 def pre_processing():
     json_data = request.get_json()
     data = json_data.get('data')
-    
-    remove_emoji = []
-    remove_character = []
-    text_lower_case = []
-    tokens = []
-    stopwords_list = []
-    stemmed_tokens = []
-    stemmed_text = []
-    slang_removed_text = []
+
     final_process = []
-    
+
     for tweet in data:
+        lowercase_text = tweet.get('full_text').lower()
+        removecharacter_text = cleansing(lowercase_text)
+        removecharacter_text = remove_emojis(removecharacter_text)
+        stopwords_text = remove_stopwords(removecharacter_text)
+        tokenize_text = word_tokenize(stopwords_text)
+        stemming_text = [stemmer.stem(token) for token in tokenize_text]
+        joined_stemming_text = ' '.join(stemming_text)  # Join the stemmed tokens into a single string
+
         modified_tweet = {
-            'removeemoji_text': remove_emojis(tweet.get('full_text')),
-            'original_emoji' : tweet.get('full_text')
+            'original_text': tweet.get('full_text'),
+            'lowercase_text': lowercase_text,
+            'removecharacter_text': removecharacter_text,
+            'stopwords_text': stopwords_text,
+            'tokenize_text': tokenize_text,
+            'stemming_text': stemming_text,
+            'result': joined_stemming_text  # Use the joined stemmed text
         }
-        remove_emoji.append(modified_tweet)
-    
-    for tweet in remove_emoji:
-        modified_tweet = {
-            'cleansing_text': cleansing(tweet.get('removeemoji_text')),
-            'original_cleansing' : tweet.get('removeemoji_text')
-        }
-        remove_character.append(modified_tweet)
-        
-    for tweet in remove_character:
-        modified_tweet = {
-            'casefolding_text': case_folding(tweet.get('cleansing_text')),
-            'original_casefolding' :tweet.get('cleansing_text')
-        }   
-        text_lower_case.append(modified_tweet)
-        
-    for tweet in text_lower_case:
-        modified_tweet = {
-            'tokenize_text': word_tokenize(tweet.get('casefolding_text')),
-            'original_tokenize' : tweet.get('casefolding_text')
-        }
-        tokens.append(modified_tweet)
-        
-    for tweet in tokens:
-        modified_tweet = {
-            'stopwords_text': remove_stopwords(tweet.get('tokenize_text')),
-            'original_stopwords' :tweet.get('tokenize_text')
-        }
-        stopwords_list.append(modified_tweet)
-        
-    for tweet in stopwords_list:
-        modified_tweet = {
-            'stemming_text': [stemmer.stem(token) for token in tweet.get('stopwords_text')],
-            'original_stemming' : tweet.get('stopwords_text')
-        }
-        stemmed_tokens.append(modified_tweet)
-        
-    for tweet in stemmed_tokens:
-        modified_tweet = {
-            'join_text': ' '.join(tweet.get('stemming_text')),
-            'original_jointext' : tweet.get('stemming_text')
-        }
-        stemmed_text.append(modified_tweet)
-        
-    for tweet in stemmed_text:
-        modified_tweet = {
-            'slangremove_andfinaltext' : slang_remove(tweet.get('join_text')),
-            'original_slangandfinaltext' : tweet.get('join_text')
-        }
-        slang_removed_text.append(modified_tweet)
-        
-    for emoji_tweet, slang_tweet in zip(remove_emoji, slang_removed_text):
-        modified_tweet = {
-            'original_emoji': emoji_tweet.get('original_emoji'),
-            'slangremove_andfinaltext': slang_tweet.get('slangremove_andfinaltext')
-        }
+
         final_process.append(modified_tweet)
-    
+
     return jsonify({
-        'remove_character': remove_character,
-        'text_lower_case': text_lower_case,
-        'tokens': tokens,
-        'stopwords_list': stopwords_list,
-        'stemmed_tokens': stemmed_tokens,
-        'stemmed_text': stemmed_text
+        'final_process': final_process
     })
+
+
+
 
 @app.route('/api/processing', methods=['POST'])
 def process_data():
@@ -298,46 +246,74 @@ def process_data():
     return jsonify(response)
 
 @app.route('/prediction', methods=['POST'])
-def predict_dataset():
+def prediction():
     try:
-        # Extract the 'data' field from the JSON payload as an array
-        texts = request.json['data']
+        data = request.json['data']
+        labels = request.json['labels']
+        test_size = request.json['testSize']
 
-        # Perform text classification for each text in the array
-        predictions = []
-        true_labels = []
-        for item in texts:
-            text = item['join_text'].lower()  # Extract the text from the 'join_text' field
+        # Extract the text items from the data
+        texts = [item['result'] for item in data]
 
-            text_counts = vectorizer_dataset.transform([text])
-            predicted_label = model_dataset.predict(text_counts)[0]
-            predicted_label = int(predicted_label)
-            predictions.append({'sentiment': predicted_label, 'text': text})
-            true_labels.append(0)  # Assuming all ground truth labels are 0 for this example
-        
-        # Calculate evaluation metrics
-        predicted_labels = [pred['sentiment'] for pred in predictions]
-        confusion = confusion_matrix(true_labels, predicted_labels)
-        accuracy = accuracy_score(true_labels, predicted_labels)
-        precision = precision_score(true_labels, predicted_labels)
-        recall = recall_score(true_labels, predicted_labels)
+        # Preprocess the text data using CountVectorizer
+        vectorizer = CountVectorizer()
+        X = vectorizer.fit_transform(texts)
 
-        # Create the response dictionary including predictions and evaluation metrics
+        # Split the data into train and test sets
+        X_train, X_test, y_train, y_test = train_test_split(X, labels, test_size=test_size, random_state=19)
+
+        # Train the classifier
+        clf = MultinomialNB()
+        clf.fit(X_train, y_train)
+
+        # Make predictions on the training set
+        y_train_pred = clf.predict(X_train)
+        y_train_true = y_train
+
+        # Make predictions on the test set
+        y_test_pred = clf.predict(X_test)
+        y_test_true = y_test
+
+        # Calculate the confusion matrix for training set
+        cm_train = confusion_matrix(y_train_true, y_train_pred)
+
+        # Calculate the confusion matrix for test set
+        cm_test = confusion_matrix(y_test_true, y_test_pred)
+
+        # Calculate accuracy, precision, and recall for train set
+        train_accuracy = clf.score(X_train, y_train)
+        train_precision = precision_score(y_train_true, y_train_pred, average='weighted')
+        train_recall = recall_score(y_train_true, y_train_pred, average='weighted')
+
+        # Calculate precision and recall for test set
+        test_accuracy = clf.score(X_test, y_test)
+        test_precision = precision_score(y_test_true, y_test_pred, average='weighted')
+        test_recall = recall_score(y_test_true, y_test_pred, average='weighted')
+
         response = {
-            'predictions': predictions,
-            'confusion_matrix': confusion.tolist(),
-            'accuracy': accuracy,
-            'precision': precision,
-            'recall': recall
+            'train_predictions': y_train_pred.tolist(),
+            'train_accuracy': train_accuracy,
+            'train_precision': train_precision,
+            'train_recall': train_recall,
+            'train_confusion_matrix': cm_train.tolist(),
+            'test_predictions': y_test_pred.tolist(),
+            'test_accuracy': test_accuracy,
+            'test_precision': test_precision,
+            'test_recall': test_recall,
+            'test_confusion_matrix': cm_test.tolist(),
+            'tweets': texts,
+            'data_train': [{'text': text, 'label': label, 'train_prediction': train_pred}
+                           for text, label, train_pred in zip(texts, labels, y_train_pred.tolist())],
+            'data_test': [{'text': text, 'label': label, 'test_prediction': test_pred}
+                          for text, label, test_pred in zip(texts, labels, y_test_pred.tolist())],
         }
 
-        # Return the response dictionary as JSON response
+        print(response)  # Print the response object to debug
+
         return jsonify(response)
-    
     except Exception as e:
-        # Return an error message if an exception occurs
-        return jsonify({'error': str(e)})
-    
+        return jsonify({'error': str(e)}), 400
+
 @app.route('/', methods=['GET'])
 def hello_world():
     hello = "Hello World"
